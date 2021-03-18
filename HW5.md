@@ -1,6 +1,6 @@
-# SA hw5 NIS&NFS
+###### tags: `SA`
+# SA hw5
 
-[大神a筆記](https://yuuki1532.wordpress.com/2020/01/05/sa-hw5-nisnfs/)
 ## NIS Client
 [Ref Link1](https://blog.zespre.com/2014/12/25/freebsd-nis-nfs.html)
 [Ref Link2](http://wiki.weithenn.org/cgi-bin/wiki.pl?NIS-Network_Information_Service)
@@ -44,14 +44,19 @@ nisuser3:*:1007:1007:nisuser3:/net/home/nisuser3:/usr/local/bin/bash
 ```
 
 - Let the Nis user accounts to login in to your server  
-    - vipw 修改 /etc/master.passwd 將~~非系統本身的使用者移除~~，並在檔案最後加入下列一行：`+:::::::::`
-    - vigr編輯 /etc/group，將~~非系統本身的使用者移除~~，並加入這一行：
+    - vipw 修改 /etc/master.passwd 將非系統本身的使用者移除(我沒移除)，並在檔案最後加入下列一行：`+:::::::::`
+    - vigr編輯 /etc/group，將非系統本身的使用者移除(我沒移除)，並加入這一行：
     `+:*::`
+```
+$ sudo cp /etc/master.passwd /var/yp
+$ sudo cp /etc/group /var/yp/
+```
 - Set home directory of NIS user to be '/net/home/<username>' when they login 
 ```
-sudo pw usermod nisuser1 -m /net/home
+sudo pw usermod nisuser1 -m /net/home/nisuser1
+sudo pw usermod nisuser2 -m /net/home/nisuser2
+sudo pw usermod nisuser3 -m /net/home/nisuser3
 ```
-- 
 
 
 ## NFS Client
@@ -93,85 +98,82 @@ Exports list on 10.113.0.254:
 /net/data                          10.113.0.0 
 
 ```
-- How to mount directories from NFS server
+- How to mount directories from NFS server **(可以不用做這個階段 直接跳去auto mounting)**
     - 執行 mount_nfs 指令時加上參數 -s 如此一來當 NFS Client 掛載 (mount) 失敗幾次之後便不再嘗試去 mount
     - 執行 mount_nfs 指令時加上參數 -i 為允許使用 Ctrl+C 來中斷掛載 (mount)
+    - 執行如何指令將 NFS Server (10.113.0.254) 所分享的資料夾 (/net/data,/net/home) 手動掛載到自已的資料夾（我掛到 /net/home與/net/data 自己建立的資料夾) 之下
+    
 ```
-mount_nfs -s -i filecenter:/usr/home  /mnt/home 
+mount_nfs -s -i 10.113.0.254:/net/home /net/home
+mount_nfs -s -i 10.113.0.254:/net/data /net/data
 ```
 
 - Auto Mounting
+[direct and indirect map ref](https://www.freebsd.org/cgi/man.cgi?query=auto_master&sektion=5&fbclid=IwAR2HSHAmq8boOMJfhCW24V0YqN3Wz7NYVDIZ6eVDK3m0EjRbBrhR00-PYLc)
     - AMD(automounter daemon)
         - For more details plz look up the Ref link
     - Autofs
         - modify`/etc/rc.conf`:
         `autofs_enable=”YES”`
-        - modify `/etc/auto_master`:
-        ~~`/net        /etc/auto.nas`~~
-        `/-        /etc/auto.nas`
-        - modify `/etc/auto.nas`:
-        ~~`data -intr,nfsv3 10.113.0.254:/net/data`
+        ~~- indirect map (don't use this)
+        1.modify `/etc/auto_master`:
+        `/net        /etc/auto.nas`
+        2.modify `/etc/auto.nas`:
+        `data -intr,nfsv3 10.113.0.254:/net/data`
         `home -intr,nfsv3 10.113.0.254:/net/home`~~
-        `/net/data -intr,nfsv3,nosuid,ro 10.113.0.254:/net/data`
+        - direct map (use this)
+        1.modify `/etc/auto_master`:
+        `/-        /etc/auto.nas` 把沒註解掉的那行改成這個
+        2.modify `/etc/auto.nas`:
+         `/net/data -intr,nfsv3,nosuid,ro 10.113.0.254:/net/data`
         `/net/home -intr,nfsv3,nosuid 10.113.0.254:/net/home`
-    
-
+    - Then autofs can be started by running:
+    ```
+    service automount start
+    service automountd start
+    service autounmountd start
+    ```
+    - check if the files are mounted
 ## NFS Server
 [NFS Server 端設定](https://dywang.csie.cyut.edu.tw/dywang/rhcsaNote/node61.html)
 
-- Exports
-  - /net/alpha
-  - /net/share
-  - /net/admin
+
   發現無法mkdir資料夾，因為autofs不能用indirect map，要直接掛載到根目錄，用direct map
-- When someone mount your storage as ‘root’, they only have permissions same as nobody.
-- Normal user access /net/alpha as their own UID and GID.
 
-- Normal user access /net/share as UID=user, GID=users.(應該不用做)
+- Normal user access /net/share as UID=user, GID=users.(不用做)
 **For NFS Server, please ignore "Normal user access /net/share as UID=user, GID=users" on HW5 Page 5.**
+- /net/admin is read-only.(不用做)
+**Three folders with same permission.**
 
-- /net/admin is read-only.
-- NFSv4 with nfsuserd for mapping UID and username.
-- /etc/exports must be NFSv4 format.
-
-
-
-<!-- `sudo service nfsd start`
-`sudo service rpcbind start` -->
-
-**這樣好像不是NFSv4 format，上面這樣打的話showmount會只有alpha**
-
-![](https://i.imgur.com/eZp959y.png)
-
+所以modify /etc/exports
 ```
-#這個是我的結果，不過不知道怎麼看有沒有符合spec
-% showmount -e
-Exports list on localhost:
-/net/share                         Everyone
-/net/alpha                         Everyone
-/net/admin                         Everyone
-
-
-% cat /etc/exports
-V4: / -sec=sys
-/net/alpha /net/share /net/admin -maproot=nobody -network 10.113.0.0/16
+不確定唷
+V4: /net -sec=sys
+/net/alpha /net/share /net/admin -maproot=nobody
 ```
+>是這樣設定嗎？？
 
->是不是不用-ro啊？因為有人問助教這題 回答為 是![](https://i.imgur.com/rxoFovR.png)
->如果是這樣的話那應該就是我上面做得這樣了(?)
->只是不知道這個怎麼測NFSv4 with nfsuserd for mapping UID and username
+| 參數        | 意義      |
+| --------   | -------- |
+| -ro        | 表示 read only，唯讀。  |
+| -maproot=user|如果 client 以 root 存取，則將它的權限對映成本機 user 的權限。|
+| -mapall=user	|將所有 client 的存取連線對映到 user，也就是說所有人的身份都轉成 user。|
+| -alldirs	|可以讓使用者將該分享資料夾的任一目錄做為 mount point。也就是說當我們分享的是 /usr 時，client也可以將 /usr/include 當成掛入點來 mount。但前提是 /usr 必須是一個獨立的 filesystem，也就是說 /usr必須是獨立分割成一個 slice。|
+| -network IP -mask MASK	| 指定允許連線的網域。
+改完記得重啟動mountd
+modify /etc/rc.conf `mountd_enable="YES"`
+`sudo service mountd reload`
 
-
-[ NFS server](http://mail.lsps.tp.edu.tw/~gsyan/freebsd2001/nfs.html)
-
+最後用 `showmount -e` 測 應該會看到那三個folder在export lists中
 
 ## firewall
-```
-sudo sysrc firewall_enable="YES"
-sudo sysrc firewall_type="open"
-sudo service ipfw start
-```
-(https://www.freebsd.org/doc/zh_TW/books/handbook/firewalls-ipfw.html)
+[firewall ref](https://www.freebsd.org/doc/zh_TW/books/handbook/firewalls-ipfw.html)
+- To configure the system to enable IPFW at boot time
+`sudo sysrc firewall_enable="YES"`
+- To use one of the default firewall types provided by FreeBSD, open: passes all traffic.
+`sudo sysrc firewall_type="open"`
+- After saving the needed edits, start the firewall.
+`sudo service ipfw start`
 
 ```
 sudo ipfw table BadHost create
@@ -183,11 +185,11 @@ sudo ipfw add 2000 reset tcp from "table(BadGuy)" to any
 sudo ipfw add 3000 deny ip from "table(BadHost)" to any
 sudo ipfw add 4000 deny icmp from not 10.113.0.254 to any
 ```
----
+from其他人：
 bad guy 是不是可以連ftp跟ssh以外的r 上面這個寫法會不會把這個擋掉..?
 目前在下的寫法 (完全照spec一行一行刻)
 ```
-ipfw add 2000 deny ip from "table(BadHost)" to any in
+ipfw add 2000 deny all from "table(BadHost)" to any in
 ipfw add 2010 allow tcp from 10.113.0.0/16 to any 80 in
 ipfw add 2011 allow tcp from 10.113.0.0/16 to any 443 in
 ipfw add 2020 allow icmp from 10.113.0.254 to any in
@@ -196,7 +198,24 @@ ipfw add 2030 reset tcp from "table(BadGuy)" to any 21 in
 ipfw add 2031 reset tcp from "table(BadGuy)" to any 22 in
 ```
 
+[ipfw rules的語法](https://sites.google.com/site/altohornunix/12-wang-lu-fu-wu/12-4-fang-huo-qiang-ipfw/ipfwzhilingdeyufayucanshu)
+- [action]表示這條規則要做的事
+    - deny：
+    拒絕通過的規則。
+    - reject：
+    拒絕通過的規則，符合規則的封包將被丟棄，並傳回一個host unreachable的ICMP。
+- src, dist
+    - src是封包來源，dist是封包目的地。可用關鍵字有any, me,或是以 <address/mask>[ports]的方式明確指定位址及埠號。
+**any 表示符合這規則的所有ip位址**。
+    - IP後可加上埠號：23 or 23-80 or 23,21,80，或在/etc/services中所定義的名稱，如ftp，在services中定義是21，因此寫**ftp則代表port 21, ssh代表port 22**
 
+查看所有rule
+`sudo ipfw list` or `sudo ipfw show`
+查看table
+`sudo ipfw table all list`
+- check if the setting is correct
+`sudo ipfw table BadGuy add 10.113.xx.xx`
+    加完後這個人應該就登不進去了
 ## blacklist
 
 ```
@@ -205,14 +224,41 @@ service blacklistd start
 sudo sysrc sshd_flags="-o UseBlacklist=yes"
 sudo service sshd restart
 ```
-還需再
-- vim /etc/rc.conf加上
-    - pf_enable="YES"
-    - pf_rule="/path/to/pf.conf"
-- vim /path/to/pf.conf
-    - anchor "blacklistd/*" in on 網卡名稱
-- vim /etc/blacklistd.conf
-    ssh stream * * * 5 24h
-    註解* * * * * 3 60
+因為 in `/usr/libexec/blacklistd-helper`
+```
+pf=
+if [ -f "/etc/ipfw-blacklist.rc" ]; then
+	pf="ipfw"
+	. /etc/ipfw-blacklist.rc
+	ipfw_offset=${ipfw_offset:-2000}
+fi
+```
+要有/etc/ipfw-blacklist.rc這個file 他才會知道是ipfw 所以
+`touch /etc/ipfw-blacklist.rc`就好
 
+modify `/etc/blacklistd.conf`
+>是remote ssh那邊(最後一行) 這樣嗎？
+![](https://i.imgur.com/FfLHDaL.png)
 
+改完重啟 `service blacklistd start`
+
+check unban 
+`sudo blacklistctl dump -a`
+check ban 
+`sudo blacklistctl dump -b`
+or 加r可以看到remain time
+`sudo blacklistctl dump -ar`
+
+- Also apply the rules to FTP. (+5%)
+>是這樣嗎？
+在/etc/blacklistd.conf
+![](https://i.imgur.com/ETLdr5Q.png)
+
+- Personal webpage for NIS user. (+5%)
+/usr/local/etc/nginx.conf 加入三個user的
+```
+location /people/~nisuser1 {
+    alias /net/home/nisuser1/public_html;
+    index index.html;
+}   
+```
